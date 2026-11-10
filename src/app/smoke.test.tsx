@@ -1,5 +1,5 @@
-// Opt-in smoke test: renders every route against a *running* backend and fails on render errors.
-//   SMOKE_BACKEND=http://127.0.0.1:8000 npx vitest run src/app/smoke.test.tsx
+// Opt-in smoke test: logs in, then renders every route against a *running* backend and fails on render errors.
+//   SMOKE_BACKEND=http://127.0.0.1:8000 SMOKE_EMAIL=you@example.com SMOKE_PASSWORD=... npx vitest run src/app/smoke.test.tsx
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -8,17 +8,29 @@ import { ThemeProvider } from '@mui/material';
 import { AppRoutes } from './App';
 import { buildTheme } from './theme';
 
-const backend = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.SMOKE_BACKEND;
+const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+const backend = env.SMOKE_BACKEND;
 const nativeFetch = globalThis.fetch;
 
 describe.skipIf(!backend)('smoke: every page renders against the live backend', () => {
   const errors: unknown[][] = [];
   let ids: { strategy?: number; backtest?: number; session?: number } = {};
+  let cookie = '';
 
   beforeAll(async () => {
-    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => nativeFetch(new URL(String(input), backend), init));
+    // Every API route needs a session: log in once and send the cookie with every request.
+    const login = await nativeFetch(new URL('/api/auth/login', backend), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: env.SMOKE_EMAIL ?? '', password: env.SMOKE_PASSWORD ?? '' }),
+    });
+    if (!login.ok) throw new Error(`Smoke login failed (${login.status}): set SMOKE_EMAIL / SMOKE_PASSWORD`);
+    cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+    const withCookie = (init?: RequestInit): RequestInit => ({ ...init, headers: { ...(init?.headers as Record<string, string>), Cookie: cookie } });
+
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => nativeFetch(new URL(String(input), backend), withCookie(init)));
     vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
-    const get = async (p: string) => (await nativeFetch(new URL(p, backend))).json();
+    const get = async (p: string) => (await nativeFetch(new URL(p, backend), withCookie())).json();
     ids = { strategy: (await get('/api/strategies'))[0]?.id, backtest: (await get('/api/backtests'))[0]?.id, session: (await get('/api/paper-sessions'))[0]?.id };
   });
   afterAll(() => vi.unstubAllGlobals());

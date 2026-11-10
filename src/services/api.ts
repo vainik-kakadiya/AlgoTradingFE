@@ -42,6 +42,17 @@ export class ApiError extends Error {
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
+export interface AuthUser {
+  email: string;
+  expires_at: number;
+}
+
+// Called when any request reports that the login session is missing or expired.
+let onUnauthenticated: (() => void) | null = null;
+export function setUnauthenticatedHandler(handler: (() => void) | null): void {
+  onUnauthenticated = handler;
+}
+
 export function buildQuery(params?: Query): string {
   if (!params) return '';
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '');
@@ -65,9 +76,18 @@ async function request<T>(method: string, path: string, body?: unknown, query?: 
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
+  let data;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    // Non-JSON body, e.g. an nginx "502 Bad Gateway" page while the backend restarts.
+    if (res.ok) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response from the server.');
+    data = undefined;
+  }
   if (!res.ok) {
     const err = data?.error;
+    // Only the app's own session error; e.g. KITE_NOT_AUTHENTICATED is also a 401 but means something else.
+    if (res.status === 401 && err?.code === 'UNAUTHENTICATED') onUnauthenticated?.();
     throw new ApiError(res.status, err?.code ?? 'HTTP_ERROR', err?.message ?? res.statusText, err?.details);
   }
   return data as T;
@@ -79,6 +99,19 @@ const put = <T>(path: string, body?: unknown) => request<T>('PUT', path, body);
 const del = <T>(path: string) => request<T>('DELETE', path);
 
 export const api = {
+  // login session
+  login: (email: string, password: string) => post<AuthUser>('/api/auth/login', { email, password }),
+  logout: () => post<{ ok: boolean }>('/api/auth/logout'),
+  /** The logged-in user, or null when there is no valid session. */
+  me: async (): Promise<AuthUser | null> => {
+    try {
+      return await get<AuthUser>('/api/auth/me');
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return null;
+      throw e;
+    }
+  },
+
   // system
   health: () => get<{ status: string }>('/api/health'),
   systemStatus: () => get<SystemStatus>('/api/system/status'),

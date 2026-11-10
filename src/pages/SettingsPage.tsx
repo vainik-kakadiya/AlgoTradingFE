@@ -19,6 +19,11 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Backend configuration (read-only here; edit AlgoTradingPy/.env and restart). Secrets are never sent to the browser." />
       {kiteResult === 'connected' && <Alert severity="success" sx={{ mb: 2 }}>Kite session established.</Alert>}
       {kiteResult === 'failed' && <Alert severity="error" sx={{ mb: 2 }}>Kite login failed or was cancelled.</Alert>}
+      {kiteResult === 'expired' && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          That Kite login link has expired or was not started from this app. Click “Log in to Kite” again.
+        </Alert>
+      )}
       <QueryView query={settings}>
         {(s) => (
           <>

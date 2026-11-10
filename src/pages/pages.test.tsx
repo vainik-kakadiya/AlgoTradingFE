@@ -41,6 +41,7 @@ describe('DashboardPage', () => {
         recent_orders: [],
         recent_alerts: [],
       },
+      'GET /api/analytics/equity': { basis: 'closed-trade cumulative net P&L (no capital base)', initial_capital: null, points: [] },
     });
     renderPage(<DashboardPage />);
     expect((await screen.findAllByText('+₹1,250.00')).length).toBeGreaterThanOrEqual(2); // stat card + session row
@@ -50,6 +51,32 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/waiting for market data/)).toBeInTheDocument();
     expect(screen.getByText(/Market data feed is disconnected/)).toBeInTheDocument();
     expect(screen.getByText(/simulated paper-trading results/)).toBeInTheDocument();
+    expect(screen.getByText('Morning run')).toBeInTheDocument(); // session card
+    expect(await screen.findByText('No closed paper trades yet')).toBeInTheDocument(); // equity chart empty state
+  });
+
+  it('lists open positions in the activity grid', async () => {
+    mockApi({
+      'GET /api/dashboard': {
+        system,
+        active_sessions: [],
+        paper_all_time: emptyMetrics,
+        paper_today: { ...emptyMetrics, capital_basis: null },
+        open_positions: [{
+          id: 1, paper_session_id: 7, position_uid: 'p1', instrument_key: 'NFO:NIFTY25JAN23500CE', tradingsymbol: 'NIFTY25JAN23500CE', direction: 'LONG',
+          net_quantity: 75, average_entry_price: 120, realized_pnl: 0, unrealized_pnl: 375, last_price: 125, stop_loss: 70, take_profit: 200,
+          status: 'OPEN', signal_id: 's1', opened_at: '2025-01-06T04:00:00Z', closed_at: null,
+        }],
+        recent_signals: [],
+        recent_orders: [],
+        recent_alerts: [],
+      },
+      'GET /api/analytics/equity': { basis: 'x', initial_capital: null, points: [] },
+    });
+    renderPage(<DashboardPage />);
+    expect(await screen.findByText('NIFTY25JAN23500CE')).toBeInTheDocument();
+    expect(screen.getByText('+₹375.00')).toBeInTheDocument();
+    expect(screen.getByText('No active paper session')).toBeInTheDocument();
   });
 });
 
